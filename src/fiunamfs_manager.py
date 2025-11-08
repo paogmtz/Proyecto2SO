@@ -5,12 +5,37 @@ FiUnamFS Manager - Gestor de Sistema de Archivos FiUnamFS
 Este programa proporciona una interfaz de línea de comandos para gestionar
 archivos en imágenes de filesystem FiUnamFS (Facultad de Ingeniería UNAM).
 
-Arquitectura de 2 hilos:
-- Hilo de UI (Main): Maneja la interfaz de usuario mediante argparse
-- Hilo de E/S (Worker): Ejecuta operaciones del filesystem
+ARQUITECTURA DE 2 HILOS:
 
-Comunicación mediante queue.Queue (thread-safe FIFO)
-Sincronización: Solo el hilo de E/S modifica el filesystem (patrón single-writer)
+1. Hilo de UI (Main Thread):
+   - Maneja la interfaz de usuario mediante argparse
+   - Lee comandos del usuario y parámetros
+   - Envía comandos al hilo de E/S vía command_queue (producer)
+   - Recibe resultados del hilo de E/S vía result_queue (consumer)
+   - Muestra resultados formateados al usuario
+   - Nunca accede directamente al filesystem
+
+2. Hilo de E/S (I/O Worker Thread):
+   - Ejecuta todas las operaciones del filesystem
+   - Mantiene el file handle exclusivo del archivo .img
+   - Recibe comandos vía command_queue (consumer)
+   - Envía resultados vía result_queue (producer)
+   - Es el único que puede leer/escribir el filesystem
+
+COMUNICACIÓN THREAD-SAFE:
+
+- Mecanismo: queue.Queue (FIFO thread-safe de Python stdlib)
+- command_queue: UI thread → I/O thread (comandos)
+- result_queue: I/O thread → UI thread (resultados)
+- No se requieren locks manuales (Queue los maneja internamente)
+
+SINCRONIZACIÓN:
+
+- Patrón single-writer: Solo el I/O thread modifica el filesystem
+- Previene race conditions sin necesidad de locks explícitos
+- Las colas garantizan orden FIFO de operaciones
+- I/O thread bloquea en queue.get() cuando no hay comandos (eficiente)
+- UI thread bloquea en queue.get() esperando resultados (con timeout)
 
 Autor: PaoGo (pao.gonzma@gmail.com)
 Versión: 1.0.0
@@ -18,235 +43,18 @@ Versión: 1.0.0
 
 import argparse
 import sys
-from typing import Dict
+import queue
 
-from models.filesystem import Filesystem
-from utils.exceptions import (
-    FiUnamFSError,
-    InvalidFilesystemError,
-    FileNotFoundInFilesystemError,
-    FilenameConflictError,
-    NoSpaceError,
-    DirectoryFullError,
-    InvalidFilenameError
+from services.io_thread import IOThread
+from services.ui_thread import (
+    submit_command,
+    wait_for_result,
+    display_result,
+    display_error_result
 )
 
 
-def display_list_result(result: Dict) -> None:
-    """
-    Muestra el resultado de la operación list de forma formateada.
-
-    Args:
-        result: Diccionario con 'files', 'total_files', 'used_space', 'free_space'
-    """
-    files = result['files']
-    total_files = result['total_files']
-    used_space = result['used_space']
-    free_space = result['free_space']
-
-    print(f"\n{'=' * 80}")
-    print(f"Contenido del filesystem FiUnamFS")
-    print(f"{'=' * 80}")
-
-    if total_files == 0:
-        print("\nNo hay archivos en el filesystem.")
-    else:
-        # Encabezados de la tabla
-        print(f"\n{'Archivo':<16} {'Tamaño':>10}  {'Creado':<20} {'Modificado':<20} {'Cluster':>7}")
-        print(f"{'-' * 16} {'-' * 10}  {'-' * 20} {'-' * 20} {'-' * 7}")
-
-        # Listar cada archivo
-        for file_info in files:
-            filename = file_info['filename'][:15]  # Truncar si es muy largo
-            size = file_info['size']
-            created = file_info['created']
-            modified = file_info['modified']
-            cluster = file_info['start_cluster']
-
-            print(f"{filename:<16} {size:>10}  {created:<20} {modified:<20} {cluster:>7}")
-
-    # Resumen de espacio
-    print(f"\n{'-' * 80}")
-    print(f"Total: {total_files} archivos")
-    print(f"Espacio usado: {used_space:,} bytes ({used_space / 1024:.2f} KB)")
-    print(f"Espacio libre: {free_space:,} bytes ({free_space / 1024:.2f} KB)")
-    print(f"{'=' * 80}\n")
-
-
-def cmd_list(args: argparse.Namespace) -> int:
-    """
-    Ejecuta el comando 'list' para listar archivos del filesystem.
-
-    Args:
-        args: Argumentos parseados de argparse
-
-    Returns:
-        Código de salida (0 = éxito, 1 = error)
-    """
-    try:
-        # Abrir filesystem y ejecutar operación
-        with Filesystem(args.filesystem) as fs:
-            result = fs.list_files()
-            display_list_result(result)
-        return 0
-
-    except InvalidFilesystemError as e:
-        print(f"\n❌ Error: Filesystem inválido", file=sys.stderr)
-        print(f"   {e}", file=sys.stderr)
-        print(f"\nVerifica que el archivo sea una imagen FiUnamFS válida.", file=sys.stderr)
-        return 1
-
-    except FileNotFoundError as e:
-        print(f"\n❌ Error: Archivo no encontrado", file=sys.stderr)
-        print(f"   No se pudo abrir: {args.filesystem}", file=sys.stderr)
-        print(f"\nVerifica que la ruta sea correcta.", file=sys.stderr)
-        return 1
-
-    except FiUnamFSError as e:
-        print(f"\n❌ Error en el filesystem: {e}", file=sys.stderr)
-        return 1
-
-    except Exception as e:
-        print(f"\n❌ Error inesperado: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return 1
-
-
-def display_export_result(result: Dict) -> None:
-    """
-    Muestra el resultado de la operación export.
-
-    Args:
-        result: Diccionario con 'filename', 'bytes_copied', 'dest_path'
-    """
-    print(f"\n✓ Archivo exportado exitosamente")
-    print(f"  Archivo: {result['filename']}")
-    print(f"  Tamaño: {result['bytes_copied']:,} bytes ({result['bytes_copied'] / 1024:.2f} KB)")
-    print(f"  Destino: {result['dest_path']}\n")
-
-
-def cmd_export(args: argparse.Namespace) -> int:
-    """
-    Ejecuta el comando 'export' para copiar un archivo del filesystem.
-
-    Args:
-        args: Argumentos parseados de argparse
-
-    Returns:
-        Código de salida (0 = éxito, 1 = error)
-    """
-    try:
-        # Abrir filesystem y ejecutar operación
-        with Filesystem(args.filesystem) as fs:
-            result = fs.export_file(args.filename, args.destination)
-            display_export_result(result)
-        return 0
-
-    except FileNotFoundInFilesystemError as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        return 1
-
-    except InvalidFilesystemError as e:
-        print(f"\n❌ Error: Filesystem inválido", file=sys.stderr)
-        print(f"   {e}", file=sys.stderr)
-        return 1
-
-    except FileNotFoundError as e:
-        print(f"\n❌ Error: Archivo no encontrado", file=sys.stderr)
-        print(f"   No se pudo abrir: {args.filesystem}", file=sys.stderr)
-        return 1
-
-    except PermissionError as e:
-        print(f"\n❌ Error: Sin permisos para escribir", file=sys.stderr)
-        print(f"   {args.destination}", file=sys.stderr)
-        return 1
-
-    except FiUnamFSError as e:
-        print(f"\n❌ Error en el filesystem: {e}", file=sys.stderr)
-        return 1
-
-    except Exception as e:
-        print(f"\n❌ Error inesperado: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return 1
-
-
-def display_import_result(result: Dict) -> None:
-    """
-    Muestra el resultado de la operación import.
-
-    Args:
-        result: Diccionario con 'filename', 'bytes_copied', 'start_cluster', 'num_clusters'
-    """
-    print(f"\n✓ Archivo importado exitosamente")
-    print(f"  Archivo: {result['filename']}")
-    print(f"  Tamaño: {result['bytes_copied']:,} bytes ({result['bytes_copied'] / 1024:.2f} KB)")
-    print(f"  Cluster inicial: {result['start_cluster']}")
-    print(f"  Clusters usados: {result['num_clusters']}\n")
-
-
-def cmd_import(args: argparse.Namespace) -> int:
-    """
-    Ejecuta el comando 'import' para copiar un archivo al filesystem.
-
-    Args:
-        args: Argumentos parseados de argparse
-
-    Returns:
-        Código de salida (0 = éxito, 1 = error)
-    """
-    try:
-        # Abrir filesystem y ejecutar operación
-        with Filesystem(args.filesystem) as fs:
-            result = fs.import_file(args.source, args.name)
-            display_import_result(result)
-        return 0
-
-    except FileNotFoundError as e:
-        if 'source' in str(e).lower() or args.source in str(e):
-            print(f"\n❌ Error: Archivo fuente no encontrado", file=sys.stderr)
-            print(f"   {args.source}", file=sys.stderr)
-        else:
-            print(f"\n❌ Error: Filesystem no encontrado", file=sys.stderr)
-            print(f"   {args.filesystem}", file=sys.stderr)
-        return 1
-
-    except InvalidFilenameError as e:
-        print(f"\n❌ Error: Nombre de archivo inválido", file=sys.stderr)
-        print(f"   {e}", file=sys.stderr)
-        return 1
-
-    except FilenameConflictError as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        return 1
-
-    except NoSpaceError as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        return 1
-
-    except DirectoryFullError as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
-        return 1
-
-    except InvalidFilesystemError as e:
-        print(f"\n❌ Error: Filesystem inválido", file=sys.stderr)
-        print(f"   {e}", file=sys.stderr)
-        return 1
-
-    except FiUnamFSError as e:
-        print(f"\n❌ Error en el filesystem: {e}", file=sys.stderr)
-        return 1
-
-    except Exception as e:
-        print(f"\n❌ Error inesperado: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return 1
-
-
-def _prompt_confirmation(filename: str, size: int) -> bool:
+def prompt_confirmation(filename: str, size: int) -> bool:
     """
     Solicita confirmación al usuario antes de eliminar un archivo.
 
@@ -262,22 +70,9 @@ def _prompt_confirmation(filename: str, size: int) -> bool:
     return response in ['s', 'si', 'sí', 'y', 'yes']
 
 
-def display_delete_result(result: Dict) -> None:
+def cmd_list(args: argparse.Namespace) -> int:
     """
-    Muestra el resultado de la operación delete.
-
-    Args:
-        result: Diccionario con 'filename', 'freed_clusters', 'freed_bytes'
-    """
-    print(f"\n✓ Archivo eliminado exitosamente")
-    print(f"  Archivo: {result['filename']}")
-    print(f"  Espacio liberado: {result['freed_bytes']:,} bytes ({result['freed_bytes'] / 1024:.2f} KB)")
-    print(f"  Clusters liberados: {result['freed_clusters']}\n")
-
-
-def cmd_delete(args: argparse.Namespace) -> int:
-    """
-    Ejecuta el comando 'delete' para eliminar un archivo del filesystem.
+    Ejecuta el comando 'list' usando arquitectura de threading.
 
     Args:
         args: Argumentos parseados de argparse
@@ -285,60 +80,190 @@ def cmd_delete(args: argparse.Namespace) -> int:
     Returns:
         Código de salida (0 = éxito, 1 = error)
     """
-    try:
-        # Abrir filesystem
-        with Filesystem(args.filesystem) as fs:
-            # Buscar archivo para obtener tamaño
-            entry = fs._find_file(args.filename)
+    # Crear colas de comunicación thread-safe
+    command_queue = queue.Queue()  # UI → I/O
+    result_queue = queue.Queue()   # I/O → UI
 
-            # Solicitar confirmación
-            if not _prompt_confirmation(args.filename, entry.file_size):
+    # Crear e iniciar hilo de E/S
+    io_thread = IOThread(args.filesystem, command_queue, result_queue)
+    io_thread.start()
+
+    try:
+        # Enviar comando 'list' al hilo de E/S (non-blocking put)
+        submit_command(command_queue, 'list', None)
+
+        # Esperar resultado del hilo de E/S (blocking get con timeout)
+        result = wait_for_result(result_queue, timeout=10.0)
+
+        # Mostrar resultado
+        if result['status'] == 'success':
+            display_result(result)
+            return 0
+        else:
+            display_error_result(result)
+            return 1
+
+    except queue.Empty:
+        print("\n❌ Error: Timeout esperando respuesta del filesystem", file=sys.stderr)
+        return 1
+
+    finally:
+        # Enviar señal de salida al hilo de E/S
+        submit_command(command_queue, 'exit', None)
+        # Esperar a que el hilo termine (con timeout)
+        io_thread.join(timeout=5.0)
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    """
+    Ejecuta el comando 'export' usando arquitectura de threading.
+
+    Args:
+        args: Argumentos parseados de argparse
+
+    Returns:
+        Código de salida (0 = éxito, 1 = error)
+    """
+    command_queue = queue.Queue()
+    result_queue = queue.Queue()
+
+    io_thread = IOThread(args.filesystem, command_queue, result_queue)
+    io_thread.start()
+
+    try:
+        submit_command(command_queue, 'export', {
+            'filename': args.filename,
+            'dest_path': args.destination
+        })
+
+        result = wait_for_result(result_queue, timeout=10.0)
+
+        if result['status'] == 'success':
+            display_result(result)
+            return 0
+        else:
+            display_error_result(result)
+            return 1
+
+    except queue.Empty:
+        print("\n❌ Error: Timeout esperando respuesta del filesystem", file=sys.stderr)
+        return 1
+
+    finally:
+        submit_command(command_queue, 'exit', None)
+        io_thread.join(timeout=5.0)
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    """
+    Ejecuta el comando 'import' usando arquitectura de threading.
+
+    Args:
+        args: Argumentos parseados de argparse
+
+    Returns:
+        Código de salida (0 = éxito, 1 = error)
+    """
+    command_queue = queue.Queue()
+    result_queue = queue.Queue()
+
+    io_thread = IOThread(args.filesystem, command_queue, result_queue)
+    io_thread.start()
+
+    try:
+        submit_command(command_queue, 'import', {
+            'src_path': args.source,
+            'filename': args.name
+        })
+
+        result = wait_for_result(result_queue, timeout=10.0)
+
+        if result['status'] == 'success':
+            display_result(result)
+            return 0
+        else:
+            display_error_result(result)
+            return 1
+
+    except queue.Empty:
+        print("\n❌ Error: Timeout esperando respuesta del filesystem", file=sys.stderr)
+        return 1
+
+    finally:
+        submit_command(command_queue, 'exit', None)
+        io_thread.join(timeout=5.0)
+
+
+def cmd_delete(args: argparse.Namespace) -> int:
+    """
+    Ejecuta el comando 'delete' usando arquitectura de threading.
+
+    Args:
+        args: Argumentos parseados de argparse
+
+    Returns:
+        Código de salida (0 = éxito, 1 = error)
+    """
+    command_queue = queue.Queue()
+    result_queue = queue.Queue()
+
+    io_thread = IOThread(args.filesystem, command_queue, result_queue)
+    io_thread.start()
+
+    try:
+        # Primer comando: solicitar confirmación (sin confirmed flag)
+        submit_command(command_queue, 'delete', {
+            'filename': args.filename,
+            'confirmed': False
+        })
+
+        result = wait_for_result(result_queue, timeout=10.0)
+
+        if result['status'] == 'error':
+            display_error_result(result)
+            return 1
+
+        # Resultado debe ser 'confirm' con info del archivo
+        if result['status'] == 'confirm':
+            # Pedir confirmación al usuario
+            if not prompt_confirmation(result['filename'], result['size']):
                 print("\nEliminación cancelada.\n")
                 return 0
 
-            # Ejecutar eliminación
-            result = fs.delete_file(args.filename)
-            display_delete_result(result)
+            # Segundo comando: ejecutar eliminación confirmada
+            submit_command(command_queue, 'delete', {
+                'filename': args.filename,
+                'confirmed': True
+            })
 
-        return 0
+            result = wait_for_result(result_queue, timeout=10.0)
 
-    except FileNotFoundInFilesystemError as e:
-        print(f"\n❌ Error: {e}", file=sys.stderr)
+            if result['status'] == 'success':
+                display_result(result)
+                return 0
+            else:
+                display_error_result(result)
+                return 1
+
+    except queue.Empty:
+        print("\n❌ Error: Timeout esperando respuesta del filesystem", file=sys.stderr)
         return 1
 
-    except InvalidFilesystemError as e:
-        print(f"\n❌ Error: Filesystem inválido", file=sys.stderr)
-        print(f"   {e}", file=sys.stderr)
-        return 1
-
-    except FileNotFoundError as e:
-        print(f"\n❌ Error: Filesystem no encontrado", file=sys.stderr)
-        print(f"   {args.filesystem}", file=sys.stderr)
-        return 1
-
-    except FiUnamFSError as e:
-        print(f"\n❌ Error en el filesystem: {e}", file=sys.stderr)
-        return 1
-
-    except Exception as e:
-        print(f"\n❌ Error inesperado: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return 1
+    finally:
+        submit_command(command_queue, 'exit', None)
+        io_thread.join(timeout=5.0)
 
 
 def main():
     """
     Función principal - configura argparse y ejecuta el comando apropiado.
     """
-    # Parser principal
     parser = argparse.ArgumentParser(
         prog='fiunamfs_manager',
         description='Gestor de archivos para filesystem FiUnamFS',
         epilog='Proyecto académico - Sistemas Operativos, FI-UNAM'
     )
 
-    # Subcommands
     subparsers = parser.add_subparsers(
         title='comandos',
         description='Operaciones disponibles',
