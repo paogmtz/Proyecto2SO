@@ -387,6 +387,169 @@ class Filesystem:
             'dest_path': dest_path
         }
 
+    def _build_cluster_map(self) -> ClusterMap:
+        """
+        Construye un mapa de clusters ocupados/libres basado en el directorio.
+
+        Returns:
+            ClusterMap con todos los archivos activos marcados
+        """
+        cluster_map = ClusterMap(self.superblock.total_clusters)
+
+        # Marcar clusters ocupados por cada archivo activo
+        for entry in self.directory_entries:
+            if entry.is_active():
+                cluster_map.allocate_file(
+                    entry.start_cluster,
+                    entry.num_clusters_needed()
+                )
+
+        return cluster_map
+
+    def _find_empty_directory_slot(self) -> int:
+        """
+        Encuentra la primera entrada de directorio vacía.
+
+        Returns:
+            Índice de la entrada vacía (0-63)
+
+        Raises:
+            DirectoryFullError: Si no hay entradas disponibles
+        """
+        from ..utils.exceptions import DirectoryFullError
+
+        for i, entry in enumerate(self.directory_entries):
+            if entry.is_empty():
+                return i
+
+        raise DirectoryFullError()
+
+    def _write_directory_entry(self, index: int, entry) -> None:
+        """
+        Escribe una entrada de directorio en el filesystem.
+
+        Args:
+            index: Índice de la entrada (0-63)
+            entry: DirectoryEntry a escribir
+        """
+        # Calcular offset: 1024 (superblock) + index × 64
+        offset = 1024 + (index * 64)
+
+        # Posicionarse en el offset
+        self.file_handle.seek(offset)
+
+        # Escribir los 64 bytes de la entrada
+        self.file_handle.write(entry.to_bytes())
+
+        # Flush para asegurar escritura
+        self.file_handle.flush()
+
+        # Actualizar cache local
+        self.directory_entries[index] = entry
+
+    def _write_file_data(self, start_cluster: int, data: bytes) -> None:
+        """
+        Escribe datos de archivo en el área de datos.
+
+        Args:
+            start_cluster: Cluster inicial donde escribir
+            data: Bytes a escribir
+        """
+        # Calcular offset: start_cluster × 1024
+        offset = start_cluster * 1024
+
+        # Posicionarse en el offset
+        self.file_handle.seek(offset)
+
+        # Escribir los datos
+        self.file_handle.write(data)
+
+        # Flush para asegurar escritura
+        self.file_handle.flush()
+
+    def import_file(self, src_path: str, filename: str = None) -> dict:
+        """
+        Importa un archivo del sistema local al filesystem.
+
+        Args:
+            src_path: Ruta del archivo local a importar
+            filename: Nombre para el archivo en FiUnamFS (opcional,
+                     usa nombre del archivo fuente si no se especifica)
+
+        Returns:
+            Diccionario con resultado:
+                - 'filename': Nombre del archivo
+                - 'bytes_copied': Bytes copiados
+                - 'start_cluster': Cluster inicial asignado
+                - 'num_clusters': Clusters utilizados
+
+        Raises:
+            ValueError: Si el nombre de archivo es inválido
+            FilenameConflictError: Si ya existe un archivo con ese nombre
+            NoSpaceError: Si no hay espacio contiguo suficiente
+            DirectoryFullError: Si el directorio está lleno
+        """
+        import os
+        from ..utils.validation import validar_nombre_archivo, calcular_clusters_necesarios
+        from ..utils.exceptions import FilenameConflictError, NoSpaceError
+        from .directory_entry import DirectoryEntry
+
+        # Determinar nombre de archivo
+        if filename is None:
+            filename = os.path.basename(src_path)
+
+        # Validar nombre de archivo
+        validar_nombre_archivo(filename)
+
+        # Verificar que no exista archivo con ese nombre
+        for entry in self.directory_entries:
+            if entry.is_active() and entry.filename == filename:
+                raise FilenameConflictError(filename)
+
+        # Leer archivo fuente
+        with open(src_path, 'rb') as f:
+            data = f.read()
+
+        file_size = len(data)
+
+        # Calcular clusters necesarios
+        clusters_necesarios = calcular_clusters_necesarios(file_size)
+
+        # Construir mapa de clusters
+        cluster_map = self._build_cluster_map()
+
+        # Buscar espacio contiguo
+        start_cluster = cluster_map.find_contiguous_space(clusters_necesarios)
+
+        if start_cluster is None:
+            # No hay espacio contiguo suficiente
+            clusters_disponibles = cluster_map.largest_contiguous_block()
+            raise NoSpaceError(
+                bytes_necesarios=file_size,
+                bytes_disponibles=clusters_disponibles * 1024,
+                clusters_necesarios=clusters_necesarios,
+                clusters_disponibles=clusters_disponibles
+            )
+
+        # Escribir datos del archivo
+        self._write_file_data(start_cluster, data)
+
+        # Crear entrada de directorio
+        new_entry = DirectoryEntry.create_file(filename, start_cluster, file_size)
+
+        # Encontrar slot vacío en directorio
+        slot_index = self._find_empty_directory_slot()
+
+        # Escribir entrada de directorio
+        self._write_directory_entry(slot_index, new_entry)
+
+        return {
+            'filename': filename,
+            'bytes_copied': file_size,
+            'start_cluster': start_cluster,
+            'num_clusters': clusters_necesarios
+        }
+
     def close(self):
         """Cierra el file handle del filesystem."""
         if self.file_handle:
