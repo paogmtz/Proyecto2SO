@@ -246,6 +246,87 @@ def cmd_import(args: argparse.Namespace) -> int:
         return 1
 
 
+def _prompt_confirmation(filename: str, size: int) -> bool:
+    """
+    Solicita confirmación al usuario antes de eliminar un archivo.
+
+    Args:
+        filename: Nombre del archivo a eliminar
+        size: Tamaño del archivo en bytes
+
+    Returns:
+        True si el usuario confirma, False si cancela
+    """
+    prompt = f"¿Eliminar '{filename}' ({size:,} bytes)? [s/N]: "
+    response = input(prompt).strip().lower()
+    return response in ['s', 'si', 'sí', 'y', 'yes']
+
+
+def display_delete_result(result: Dict) -> None:
+    """
+    Muestra el resultado de la operación delete.
+
+    Args:
+        result: Diccionario con 'filename', 'freed_clusters', 'freed_bytes'
+    """
+    print(f"\n✓ Archivo eliminado exitosamente")
+    print(f"  Archivo: {result['filename']}")
+    print(f"  Espacio liberado: {result['freed_bytes']:,} bytes ({result['freed_bytes'] / 1024:.2f} KB)")
+    print(f"  Clusters liberados: {result['freed_clusters']}\n")
+
+
+def cmd_delete(args: argparse.Namespace) -> int:
+    """
+    Ejecuta el comando 'delete' para eliminar un archivo del filesystem.
+
+    Args:
+        args: Argumentos parseados de argparse
+
+    Returns:
+        Código de salida (0 = éxito, 1 = error)
+    """
+    try:
+        # Abrir filesystem
+        with Filesystem(args.filesystem) as fs:
+            # Buscar archivo para obtener tamaño
+            entry = fs._find_file(args.filename)
+
+            # Solicitar confirmación
+            if not _prompt_confirmation(args.filename, entry.file_size):
+                print("\nEliminación cancelada.\n")
+                return 0
+
+            # Ejecutar eliminación
+            result = fs.delete_file(args.filename)
+            display_delete_result(result)
+
+        return 0
+
+    except FileNotFoundInFilesystemError as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        return 1
+
+    except InvalidFilesystemError as e:
+        print(f"\n❌ Error: Filesystem inválido", file=sys.stderr)
+        print(f"   {e}", file=sys.stderr)
+        return 1
+
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: Filesystem no encontrado", file=sys.stderr)
+        print(f"   {args.filesystem}", file=sys.stderr)
+        return 1
+
+    except FiUnamFSError as e:
+        print(f"\n❌ Error en el filesystem: {e}", file=sys.stderr)
+        return 1
+
+    except Exception as e:
+        print(f"\n❌ Error inesperado: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
 def main():
     """
     Función principal - configura argparse y ejecuta el comando apropiado.
@@ -315,6 +396,21 @@ def main():
         help='Nombre para el archivo en FiUnamFS (opcional, usa nombre del archivo fuente por defecto)'
     )
     parser_import.set_defaults(func=cmd_import)
+
+    # Comando: delete
+    parser_delete = subparsers.add_parser(
+        'delete',
+        help='Elimina un archivo del filesystem'
+    )
+    parser_delete.add_argument(
+        'filesystem',
+        help='Ruta a la imagen del filesystem (.img)'
+    )
+    parser_delete.add_argument(
+        'filename',
+        help='Nombre del archivo a eliminar (dentro del filesystem)'
+    )
+    parser_delete.set_defaults(func=cmd_delete)
 
     # Parsear argumentos
     args = parser.parse_args()

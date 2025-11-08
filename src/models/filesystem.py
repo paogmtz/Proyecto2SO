@@ -550,6 +550,50 @@ class Filesystem:
             'num_clusters': clusters_necesarios
         }
 
+    def delete_file(self, filename: str) -> dict:
+        """
+        Elimina un archivo del filesystem.
+
+        Args:
+            filename: Nombre del archivo a eliminar
+
+        Returns:
+            Diccionario con resultado:
+                - 'filename': Nombre del archivo eliminado
+                - 'freed_clusters': Clusters liberados
+                - 'freed_bytes': Bytes liberados
+
+        Raises:
+            FileNotFoundInFilesystemError: Si el archivo no existe
+        """
+        from .directory_entry import DirectoryEntry
+
+        # Buscar el archivo
+        entry = self._find_file(filename)
+
+        # Calcular espacio liberado
+        freed_clusters = entry.num_clusters_needed()
+        freed_bytes = entry.file_size
+
+        # Encontrar índice de la entrada en el directorio
+        entry_index = None
+        for i, e in enumerate(self.directory_entries):
+            if e.is_active() and e.filename == filename:
+                entry_index = i
+                break
+
+        # Crear entrada vacía
+        empty_entry = DirectoryEntry.create_empty()
+
+        # Escribir entrada vacía
+        self._write_directory_entry(entry_index, empty_entry)
+
+        return {
+            'filename': filename,
+            'freed_clusters': freed_clusters,
+            'freed_bytes': freed_bytes
+        }
+
     def close(self):
         """Cierra el file handle del filesystem."""
         if self.file_handle:
