@@ -296,6 +296,304 @@ class Filesystem:
             'free_space': free_space
         }
 
+    def _find_file(self, filename: str):
+        """
+        Busca un archivo en el directorio por nombre.
+
+        Args:
+            filename: Nombre del archivo a buscar
+
+        Returns:
+            DirectoryEntry del archivo encontrado
+
+        Raises:
+            FileNotFoundInFilesystemError: Si el archivo no existe
+        """
+        from ..utils.exceptions import FileNotFoundInFilesystemError
+
+        # Buscar en las entradas de directorio
+        for entry in self.directory_entries:
+            if entry.is_active() and entry.filename == filename:
+                return entry
+
+        # Archivo no encontrado - construir lista de archivos disponibles
+        archivos_disponibles = [
+            entry.filename
+            for entry in self.directory_entries
+            if entry.is_active()
+        ]
+
+        raise FileNotFoundInFilesystemError(filename, archivos_disponibles)
+
+    def _read_file_data(self, entry) -> bytes:
+        """
+        Lee los datos de un archivo desde el filesystem.
+
+        Args:
+            entry: DirectoryEntry del archivo a leer
+
+        Returns:
+            Bytes del contenido del archivo
+        """
+        # Calcular offset en bytes: cluster × 1024
+        offset = entry.start_cluster * 1024
+
+        # Posicionarse en el inicio del archivo
+        self.file_handle.seek(offset)
+
+        # Leer exactamente file_size bytes
+        data = self.file_handle.read(entry.file_size)
+
+        return data
+
+    def export_file(self, filename: str, dest_path: str) -> dict:
+        """
+        Exporta un archivo del filesystem al sistema local.
+
+        Args:
+            filename: Nombre del archivo en FiUnamFS
+            dest_path: Ruta destino en el sistema local
+
+        Returns:
+            Diccionario con resultado:
+                - 'filename': Nombre del archivo
+                - 'bytes_copied': Bytes copiados
+                - 'dest_path': Ruta destino
+
+        Raises:
+            FileNotFoundInFilesystemError: Si el archivo no existe
+            IOError: Si hay error al escribir el archivo destino
+        """
+        import os
+
+        # Buscar el archivo
+        entry = self._find_file(filename)
+
+        # Leer los datos del archivo
+        data = self._read_file_data(entry)
+
+        # Crear directorio padre si no existe
+        dest_dir = os.path.dirname(dest_path)
+        if dest_dir and not os.path.exists(dest_dir):
+            os.makedirs(dest_dir)
+
+        # Escribir archivo destino
+        with open(dest_path, 'wb') as f:
+            f.write(data)
+
+        return {
+            'filename': filename,
+            'bytes_copied': len(data),
+            'dest_path': dest_path
+        }
+
+    def _build_cluster_map(self) -> ClusterMap:
+        """
+        Construye un mapa de clusters ocupados/libres basado en el directorio.
+
+        Returns:
+            ClusterMap con todos los archivos activos marcados
+        """
+        cluster_map = ClusterMap(self.superblock.total_clusters)
+
+        # Marcar clusters ocupados por cada archivo activo
+        for entry in self.directory_entries:
+            if entry.is_active():
+                cluster_map.allocate_file(
+                    entry.start_cluster,
+                    entry.num_clusters_needed()
+                )
+
+        return cluster_map
+
+    def _find_empty_directory_slot(self) -> int:
+        """
+        Encuentra la primera entrada de directorio vacía.
+
+        Returns:
+            Índice de la entrada vacía (0-63)
+
+        Raises:
+            DirectoryFullError: Si no hay entradas disponibles
+        """
+        from ..utils.exceptions import DirectoryFullError
+
+        for i, entry in enumerate(self.directory_entries):
+            if entry.is_empty():
+                return i
+
+        raise DirectoryFullError()
+
+    def _write_directory_entry(self, index: int, entry) -> None:
+        """
+        Escribe una entrada de directorio en el filesystem.
+
+        Args:
+            index: Índice de la entrada (0-63)
+            entry: DirectoryEntry a escribir
+        """
+        # Calcular offset: 1024 (superblock) + index × 64
+        offset = 1024 + (index * 64)
+
+        # Posicionarse en el offset
+        self.file_handle.seek(offset)
+
+        # Escribir los 64 bytes de la entrada
+        self.file_handle.write(entry.to_bytes())
+
+        # Flush para asegurar escritura
+        self.file_handle.flush()
+
+        # Actualizar cache local
+        self.directory_entries[index] = entry
+
+    def _write_file_data(self, start_cluster: int, data: bytes) -> None:
+        """
+        Escribe datos de archivo en el área de datos.
+
+        Args:
+            start_cluster: Cluster inicial donde escribir
+            data: Bytes a escribir
+        """
+        # Calcular offset: start_cluster × 1024
+        offset = start_cluster * 1024
+
+        # Posicionarse en el offset
+        self.file_handle.seek(offset)
+
+        # Escribir los datos
+        self.file_handle.write(data)
+
+        # Flush para asegurar escritura
+        self.file_handle.flush()
+
+    def import_file(self, src_path: str, filename: str = None) -> dict:
+        """
+        Importa un archivo del sistema local al filesystem.
+
+        Args:
+            src_path: Ruta del archivo local a importar
+            filename: Nombre para el archivo en FiUnamFS (opcional,
+                     usa nombre del archivo fuente si no se especifica)
+
+        Returns:
+            Diccionario con resultado:
+                - 'filename': Nombre del archivo
+                - 'bytes_copied': Bytes copiados
+                - 'start_cluster': Cluster inicial asignado
+                - 'num_clusters': Clusters utilizados
+
+        Raises:
+            ValueError: Si el nombre de archivo es inválido
+            FilenameConflictError: Si ya existe un archivo con ese nombre
+            NoSpaceError: Si no hay espacio contiguo suficiente
+            DirectoryFullError: Si el directorio está lleno
+        """
+        import os
+        from ..utils.validation import validar_nombre_archivo, calcular_clusters_necesarios
+        from ..utils.exceptions import FilenameConflictError, NoSpaceError
+        from .directory_entry import DirectoryEntry
+
+        # Determinar nombre de archivo
+        if filename is None:
+            filename = os.path.basename(src_path)
+
+        # Validar nombre de archivo
+        validar_nombre_archivo(filename)
+
+        # Verificar que no exista archivo con ese nombre
+        for entry in self.directory_entries:
+            if entry.is_active() and entry.filename == filename:
+                raise FilenameConflictError(filename)
+
+        # Leer archivo fuente
+        with open(src_path, 'rb') as f:
+            data = f.read()
+
+        file_size = len(data)
+
+        # Calcular clusters necesarios
+        clusters_necesarios = calcular_clusters_necesarios(file_size)
+
+        # Construir mapa de clusters
+        cluster_map = self._build_cluster_map()
+
+        # Buscar espacio contiguo
+        start_cluster = cluster_map.find_contiguous_space(clusters_necesarios)
+
+        if start_cluster is None:
+            # No hay espacio contiguo suficiente
+            clusters_disponibles = cluster_map.largest_contiguous_block()
+            raise NoSpaceError(
+                bytes_necesarios=file_size,
+                bytes_disponibles=clusters_disponibles * 1024,
+                clusters_necesarios=clusters_necesarios,
+                clusters_disponibles=clusters_disponibles
+            )
+
+        # Escribir datos del archivo
+        self._write_file_data(start_cluster, data)
+
+        # Crear entrada de directorio
+        new_entry = DirectoryEntry.create_file(filename, start_cluster, file_size)
+
+        # Encontrar slot vacío en directorio
+        slot_index = self._find_empty_directory_slot()
+
+        # Escribir entrada de directorio
+        self._write_directory_entry(slot_index, new_entry)
+
+        return {
+            'filename': filename,
+            'bytes_copied': file_size,
+            'start_cluster': start_cluster,
+            'num_clusters': clusters_necesarios
+        }
+
+    def delete_file(self, filename: str) -> dict:
+        """
+        Elimina un archivo del filesystem.
+
+        Args:
+            filename: Nombre del archivo a eliminar
+
+        Returns:
+            Diccionario con resultado:
+                - 'filename': Nombre del archivo eliminado
+                - 'freed_clusters': Clusters liberados
+                - 'freed_bytes': Bytes liberados
+
+        Raises:
+            FileNotFoundInFilesystemError: Si el archivo no existe
+        """
+        from .directory_entry import DirectoryEntry
+
+        # Buscar el archivo
+        entry = self._find_file(filename)
+
+        # Calcular espacio liberado
+        freed_clusters = entry.num_clusters_needed()
+        freed_bytes = entry.file_size
+
+        # Encontrar índice de la entrada en el directorio
+        entry_index = None
+        for i, e in enumerate(self.directory_entries):
+            if e.is_active() and e.filename == filename:
+                entry_index = i
+                break
+
+        # Crear entrada vacía
+        empty_entry = DirectoryEntry.create_empty()
+
+        # Escribir entrada vacía
+        self._write_directory_entry(entry_index, empty_entry)
+
+        return {
+            'filename': filename,
+            'freed_clusters': freed_clusters,
+            'freed_bytes': freed_bytes
+        }
+
     def close(self):
         """Cierra el file handle del filesystem."""
         if self.file_handle:

@@ -24,7 +24,11 @@ from models.filesystem import Filesystem
 from utils.exceptions import (
     FiUnamFSError,
     InvalidFilesystemError,
-    FileNotFoundInFilesystemError
+    FileNotFoundInFilesystemError,
+    FilenameConflictError,
+    NoSpaceError,
+    DirectoryFullError,
+    InvalidFilenameError
 )
 
 
@@ -109,6 +113,220 @@ def cmd_list(args: argparse.Namespace) -> int:
         return 1
 
 
+def display_export_result(result: Dict) -> None:
+    """
+    Muestra el resultado de la operación export.
+
+    Args:
+        result: Diccionario con 'filename', 'bytes_copied', 'dest_path'
+    """
+    print(f"\n✓ Archivo exportado exitosamente")
+    print(f"  Archivo: {result['filename']}")
+    print(f"  Tamaño: {result['bytes_copied']:,} bytes ({result['bytes_copied'] / 1024:.2f} KB)")
+    print(f"  Destino: {result['dest_path']}\n")
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    """
+    Ejecuta el comando 'export' para copiar un archivo del filesystem.
+
+    Args:
+        args: Argumentos parseados de argparse
+
+    Returns:
+        Código de salida (0 = éxito, 1 = error)
+    """
+    try:
+        # Abrir filesystem y ejecutar operación
+        with Filesystem(args.filesystem) as fs:
+            result = fs.export_file(args.filename, args.destination)
+            display_export_result(result)
+        return 0
+
+    except FileNotFoundInFilesystemError as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        return 1
+
+    except InvalidFilesystemError as e:
+        print(f"\n❌ Error: Filesystem inválido", file=sys.stderr)
+        print(f"   {e}", file=sys.stderr)
+        return 1
+
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: Archivo no encontrado", file=sys.stderr)
+        print(f"   No se pudo abrir: {args.filesystem}", file=sys.stderr)
+        return 1
+
+    except PermissionError as e:
+        print(f"\n❌ Error: Sin permisos para escribir", file=sys.stderr)
+        print(f"   {args.destination}", file=sys.stderr)
+        return 1
+
+    except FiUnamFSError as e:
+        print(f"\n❌ Error en el filesystem: {e}", file=sys.stderr)
+        return 1
+
+    except Exception as e:
+        print(f"\n❌ Error inesperado: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+def display_import_result(result: Dict) -> None:
+    """
+    Muestra el resultado de la operación import.
+
+    Args:
+        result: Diccionario con 'filename', 'bytes_copied', 'start_cluster', 'num_clusters'
+    """
+    print(f"\n✓ Archivo importado exitosamente")
+    print(f"  Archivo: {result['filename']}")
+    print(f"  Tamaño: {result['bytes_copied']:,} bytes ({result['bytes_copied'] / 1024:.2f} KB)")
+    print(f"  Cluster inicial: {result['start_cluster']}")
+    print(f"  Clusters usados: {result['num_clusters']}\n")
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    """
+    Ejecuta el comando 'import' para copiar un archivo al filesystem.
+
+    Args:
+        args: Argumentos parseados de argparse
+
+    Returns:
+        Código de salida (0 = éxito, 1 = error)
+    """
+    try:
+        # Abrir filesystem y ejecutar operación
+        with Filesystem(args.filesystem) as fs:
+            result = fs.import_file(args.source, args.name)
+            display_import_result(result)
+        return 0
+
+    except FileNotFoundError as e:
+        if 'source' in str(e).lower() or args.source in str(e):
+            print(f"\n❌ Error: Archivo fuente no encontrado", file=sys.stderr)
+            print(f"   {args.source}", file=sys.stderr)
+        else:
+            print(f"\n❌ Error: Filesystem no encontrado", file=sys.stderr)
+            print(f"   {args.filesystem}", file=sys.stderr)
+        return 1
+
+    except InvalidFilenameError as e:
+        print(f"\n❌ Error: Nombre de archivo inválido", file=sys.stderr)
+        print(f"   {e}", file=sys.stderr)
+        return 1
+
+    except FilenameConflictError as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        return 1
+
+    except NoSpaceError as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        return 1
+
+    except DirectoryFullError as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        return 1
+
+    except InvalidFilesystemError as e:
+        print(f"\n❌ Error: Filesystem inválido", file=sys.stderr)
+        print(f"   {e}", file=sys.stderr)
+        return 1
+
+    except FiUnamFSError as e:
+        print(f"\n❌ Error en el filesystem: {e}", file=sys.stderr)
+        return 1
+
+    except Exception as e:
+        print(f"\n❌ Error inesperado: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+def _prompt_confirmation(filename: str, size: int) -> bool:
+    """
+    Solicita confirmación al usuario antes de eliminar un archivo.
+
+    Args:
+        filename: Nombre del archivo a eliminar
+        size: Tamaño del archivo en bytes
+
+    Returns:
+        True si el usuario confirma, False si cancela
+    """
+    prompt = f"¿Eliminar '{filename}' ({size:,} bytes)? [s/N]: "
+    response = input(prompt).strip().lower()
+    return response in ['s', 'si', 'sí', 'y', 'yes']
+
+
+def display_delete_result(result: Dict) -> None:
+    """
+    Muestra el resultado de la operación delete.
+
+    Args:
+        result: Diccionario con 'filename', 'freed_clusters', 'freed_bytes'
+    """
+    print(f"\n✓ Archivo eliminado exitosamente")
+    print(f"  Archivo: {result['filename']}")
+    print(f"  Espacio liberado: {result['freed_bytes']:,} bytes ({result['freed_bytes'] / 1024:.2f} KB)")
+    print(f"  Clusters liberados: {result['freed_clusters']}\n")
+
+
+def cmd_delete(args: argparse.Namespace) -> int:
+    """
+    Ejecuta el comando 'delete' para eliminar un archivo del filesystem.
+
+    Args:
+        args: Argumentos parseados de argparse
+
+    Returns:
+        Código de salida (0 = éxito, 1 = error)
+    """
+    try:
+        # Abrir filesystem
+        with Filesystem(args.filesystem) as fs:
+            # Buscar archivo para obtener tamaño
+            entry = fs._find_file(args.filename)
+
+            # Solicitar confirmación
+            if not _prompt_confirmation(args.filename, entry.file_size):
+                print("\nEliminación cancelada.\n")
+                return 0
+
+            # Ejecutar eliminación
+            result = fs.delete_file(args.filename)
+            display_delete_result(result)
+
+        return 0
+
+    except FileNotFoundInFilesystemError as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        return 1
+
+    except InvalidFilesystemError as e:
+        print(f"\n❌ Error: Filesystem inválido", file=sys.stderr)
+        print(f"   {e}", file=sys.stderr)
+        return 1
+
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: Filesystem no encontrado", file=sys.stderr)
+        print(f"   {args.filesystem}", file=sys.stderr)
+        return 1
+
+    except FiUnamFSError as e:
+        print(f"\n❌ Error en el filesystem: {e}", file=sys.stderr)
+        return 1
+
+    except Exception as e:
+        print(f"\n❌ Error inesperado: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
 def main():
     """
     Función principal - configura argparse y ejecuta el comando apropiado.
@@ -138,6 +356,61 @@ def main():
         help='Ruta a la imagen del filesystem (.img)'
     )
     parser_list.set_defaults(func=cmd_list)
+
+    # Comando: export
+    parser_export = subparsers.add_parser(
+        'export',
+        help='Exporta un archivo del filesystem al sistema local'
+    )
+    parser_export.add_argument(
+        'filesystem',
+        help='Ruta a la imagen del filesystem (.img)'
+    )
+    parser_export.add_argument(
+        'filename',
+        help='Nombre del archivo a exportar (dentro del filesystem)'
+    )
+    parser_export.add_argument(
+        'destination',
+        help='Ruta destino donde guardar el archivo'
+    )
+    parser_export.set_defaults(func=cmd_export)
+
+    # Comando: import
+    parser_import = subparsers.add_parser(
+        'import',
+        help='Importa un archivo del sistema local al filesystem'
+    )
+    parser_import.add_argument(
+        'filesystem',
+        help='Ruta a la imagen del filesystem (.img)'
+    )
+    parser_import.add_argument(
+        'source',
+        help='Ruta del archivo local a importar'
+    )
+    parser_import.add_argument(
+        '--name',
+        dest='name',
+        default=None,
+        help='Nombre para el archivo en FiUnamFS (opcional, usa nombre del archivo fuente por defecto)'
+    )
+    parser_import.set_defaults(func=cmd_import)
+
+    # Comando: delete
+    parser_delete = subparsers.add_parser(
+        'delete',
+        help='Elimina un archivo del filesystem'
+    )
+    parser_delete.add_argument(
+        'filesystem',
+        help='Ruta a la imagen del filesystem (.img)'
+    )
+    parser_delete.add_argument(
+        'filename',
+        help='Nombre del archivo a eliminar (dentro del filesystem)'
+    )
+    parser_delete.set_defaults(func=cmd_delete)
 
     # Parsear argumentos
     args = parser.parse_args()
