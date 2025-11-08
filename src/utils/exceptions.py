@@ -63,7 +63,13 @@ class NoSpaceError(FiUnamFSError):
     Incluye información sobre espacio necesario vs disponible.
     """
 
-    def __init__(self, bytes_necesarios: int, bytes_disponibles: int, clusters_necesarios: int, clusters_disponibles: int):
+    def __init__(
+        self,
+        bytes_necesarios: int,
+        bytes_disponibles: int,
+        clusters_necesarios: int,
+        clusters_disponibles: int
+    ):
         self.bytes_necesarios = bytes_necesarios
         self.bytes_disponibles = bytes_disponibles
         self.clusters_necesarios = clusters_necesarios
