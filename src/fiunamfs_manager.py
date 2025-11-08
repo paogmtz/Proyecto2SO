@@ -109,6 +109,66 @@ def cmd_list(args: argparse.Namespace) -> int:
         return 1
 
 
+def display_export_result(result: Dict) -> None:
+    """
+    Muestra el resultado de la operación export.
+
+    Args:
+        result: Diccionario con 'filename', 'bytes_copied', 'dest_path'
+    """
+    print(f"\n✓ Archivo exportado exitosamente")
+    print(f"  Archivo: {result['filename']}")
+    print(f"  Tamaño: {result['bytes_copied']:,} bytes ({result['bytes_copied'] / 1024:.2f} KB)")
+    print(f"  Destino: {result['dest_path']}\n")
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    """
+    Ejecuta el comando 'export' para copiar un archivo del filesystem.
+
+    Args:
+        args: Argumentos parseados de argparse
+
+    Returns:
+        Código de salida (0 = éxito, 1 = error)
+    """
+    try:
+        # Abrir filesystem y ejecutar operación
+        with Filesystem(args.filesystem) as fs:
+            result = fs.export_file(args.filename, args.destination)
+            display_export_result(result)
+        return 0
+
+    except FileNotFoundInFilesystemError as e:
+        print(f"\n❌ Error: {e}", file=sys.stderr)
+        return 1
+
+    except InvalidFilesystemError as e:
+        print(f"\n❌ Error: Filesystem inválido", file=sys.stderr)
+        print(f"   {e}", file=sys.stderr)
+        return 1
+
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: Archivo no encontrado", file=sys.stderr)
+        print(f"   No se pudo abrir: {args.filesystem}", file=sys.stderr)
+        return 1
+
+    except PermissionError as e:
+        print(f"\n❌ Error: Sin permisos para escribir", file=sys.stderr)
+        print(f"   {args.destination}", file=sys.stderr)
+        return 1
+
+    except FiUnamFSError as e:
+        print(f"\n❌ Error en el filesystem: {e}", file=sys.stderr)
+        return 1
+
+    except Exception as e:
+        print(f"\n❌ Error inesperado: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
 def main():
     """
     Función principal - configura argparse y ejecuta el comando apropiado.
@@ -138,6 +198,25 @@ def main():
         help='Ruta a la imagen del filesystem (.img)'
     )
     parser_list.set_defaults(func=cmd_list)
+
+    # Comando: export
+    parser_export = subparsers.add_parser(
+        'export',
+        help='Exporta un archivo del filesystem al sistema local'
+    )
+    parser_export.add_argument(
+        'filesystem',
+        help='Ruta a la imagen del filesystem (.img)'
+    )
+    parser_export.add_argument(
+        'filename',
+        help='Nombre del archivo a exportar (dentro del filesystem)'
+    )
+    parser_export.add_argument(
+        'destination',
+        help='Ruta destino donde guardar el archivo'
+    )
+    parser_export.set_defaults(func=cmd_export)
 
     # Parsear argumentos
     args = parser.parse_args()

@@ -296,6 +296,97 @@ class Filesystem:
             'free_space': free_space
         }
 
+    def _find_file(self, filename: str):
+        """
+        Busca un archivo en el directorio por nombre.
+
+        Args:
+            filename: Nombre del archivo a buscar
+
+        Returns:
+            DirectoryEntry del archivo encontrado
+
+        Raises:
+            FileNotFoundInFilesystemError: Si el archivo no existe
+        """
+        from ..utils.exceptions import FileNotFoundInFilesystemError
+
+        # Buscar en las entradas de directorio
+        for entry in self.directory_entries:
+            if entry.is_active() and entry.filename == filename:
+                return entry
+
+        # Archivo no encontrado - construir lista de archivos disponibles
+        archivos_disponibles = [
+            entry.filename
+            for entry in self.directory_entries
+            if entry.is_active()
+        ]
+
+        raise FileNotFoundInFilesystemError(filename, archivos_disponibles)
+
+    def _read_file_data(self, entry) -> bytes:
+        """
+        Lee los datos de un archivo desde el filesystem.
+
+        Args:
+            entry: DirectoryEntry del archivo a leer
+
+        Returns:
+            Bytes del contenido del archivo
+        """
+        # Calcular offset en bytes: cluster × 1024
+        offset = entry.start_cluster * 1024
+
+        # Posicionarse en el inicio del archivo
+        self.file_handle.seek(offset)
+
+        # Leer exactamente file_size bytes
+        data = self.file_handle.read(entry.file_size)
+
+        return data
+
+    def export_file(self, filename: str, dest_path: str) -> dict:
+        """
+        Exporta un archivo del filesystem al sistema local.
+
+        Args:
+            filename: Nombre del archivo en FiUnamFS
+            dest_path: Ruta destino en el sistema local
+
+        Returns:
+            Diccionario con resultado:
+                - 'filename': Nombre del archivo
+                - 'bytes_copied': Bytes copiados
+                - 'dest_path': Ruta destino
+
+        Raises:
+            FileNotFoundInFilesystemError: Si el archivo no existe
+            IOError: Si hay error al escribir el archivo destino
+        """
+        import os
+
+        # Buscar el archivo
+        entry = self._find_file(filename)
+
+        # Leer los datos del archivo
+        data = self._read_file_data(entry)
+
+        # Crear directorio padre si no existe
+        dest_dir = os.path.dirname(dest_path)
+        if dest_dir and not os.path.exists(dest_dir):
+            os.makedirs(dest_dir)
+
+        # Escribir archivo destino
+        with open(dest_path, 'wb') as f:
+            f.write(data)
+
+        return {
+            'filename': filename,
+            'bytes_copied': len(data),
+            'dest_path': dest_path
+        }
+
     def close(self):
         """Cierra el file handle del filesystem."""
         if self.file_handle:
