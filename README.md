@@ -157,6 +157,8 @@ Espacio libre: 1,457,152 bytes (1,423.00 KB)
 
 FUSE permite montar el filesystem FiUnamFS como un directorio normal del sistema, lo que te permite usar comandos nativos de Linux/macOS.
 
+> **📖 Guía completa:** Para más detalles, ejemplos y solución de problemas, consulta [FUSE_QUICKSTART.md](FUSE_QUICKSTART.md)
+
 #### Montar el filesystem
 
 ```bash
@@ -369,6 +371,7 @@ Este proyecto cumple con los siguientes requisitos académicos:
 proyecto2SO/
 ├── src/
 │   ├── fiunamfs_manager.py    # Punto de entrada, CLI
+│   ├── fuse_mount.py          # Módulo FUSE
 │   ├── models/                 # Modelos de datos
 │   │   ├── superblock.py
 │   │   ├── directory_entry.py
@@ -380,6 +383,8 @@ proyecto2SO/
 │       ├── binary_utils.py
 │       ├── validation.py
 │       └── exceptions.py
+├── mount_fiunamfs.py          # Script de montaje FUSE
+├── FUSE_QUICKSTART.md         # Guía rápida de FUSE
 ├── tests/                      # Pruebas unitarias
 ├── fiunamfs/
 │   └── fiunamfs.img           # Imagen de filesystem de prueba
