@@ -361,6 +361,31 @@ class FiUnamFSMount(Operations):
             # No soportamos truncate a longitud != 0 debido a asignación contigua
             raise FuseOSError(errno.EOPNOTSUPP)
 
+    # ========== OPERACIONES DE ELIMINACIÓN ==========
+
+    def unlink(self, path: str):
+        """
+        Elimina un archivo del filesystem.
+
+        Esta operación es llamada cuando se usa el comando 'rm'.
+
+        Args:
+            path: Ruta del archivo a eliminar (e.g., "/archivo.txt")
+
+        Raises:
+            FuseOSError: Si el archivo no existe (ENOENT)
+        """
+        # Remover el '/' inicial
+        filename = path[1:]
+
+        try:
+            # Eliminar el archivo
+            self.fs.delete_file(filename)
+
+        except FileNotFoundInFilesystemError:
+            # El archivo no existe
+            raise FuseOSError(errno.ENOENT)
+
     # ========== OPERACIONES AUXILIARES ==========
 
     def statfs(self, path: str) -> Dict:
