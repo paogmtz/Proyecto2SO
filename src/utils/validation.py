@@ -116,10 +116,12 @@ def calcular_clusters_necesarios(tamanio: int) -> int:
         >>> calcular_clusters_necesarios(1025)
         2
         >>> calcular_clusters_necesarios(0)
-        0
+        1
     """
+    # Incluso archivos vacíos necesitan al menos 1 cluster
+    # para tener un espacio válido asignado en el filesystem
     if tamanio == 0:
-        return 0
+        return 1
 
     # División con techo: (tamanio + 1023) // 1024
     # Equivale a math.ceil(tamanio / 1024)

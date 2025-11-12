@@ -268,6 +268,10 @@ class FiUnamFSMount(Operations):
         except ValueError as e:
             # Nombre inválido
             raise FuseOSError(errno.EINVAL)
+        except Exception as e:
+            # Log de excepción no capturada para debugging
+            print(f"Error en create({path}): {type(e).__name__}: {e}", file=sys.stderr)
+            raise FuseOSError(errno.EIO)
 
     def write(self, path: str, data: bytes, offset: int, fh) -> int:
         """
@@ -385,6 +389,10 @@ class FiUnamFSMount(Operations):
         except FileNotFoundInFilesystemError:
             # El archivo no existe
             raise FuseOSError(errno.ENOENT)
+        except Exception as e:
+            # Log de excepción no capturada para debugging
+            print(f"Error en unlink({path}): {type(e).__name__}: {e}", file=sys.stderr)
+            raise FuseOSError(errno.EIO)
 
     # ========== OPERACIONES AUXILIARES ==========
 
