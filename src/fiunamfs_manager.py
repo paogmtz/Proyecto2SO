@@ -43,7 +43,11 @@ Versión: 1.0.0
 
 import argparse
 import sys
+import os
 import queue
+
+# Agregar el directorio src al path para imports
+sys.path.insert(0, os.path.dirname(__file__))
 
 from services.io_thread import IOThread
 from services.ui_thread import (

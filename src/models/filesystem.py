@@ -266,7 +266,7 @@ class Filesystem:
                 'free_space': 1469440
             }
         """
-        from ..utils.binary_utils import timestamp_legible
+        from utils.binary_utils import timestamp_legible
 
         files = []
         used_space = 0
@@ -309,7 +309,7 @@ class Filesystem:
         Raises:
             FileNotFoundInFilesystemError: Si el archivo no existe
         """
-        from ..utils.exceptions import FileNotFoundInFilesystemError
+        from utils.exceptions import FileNotFoundInFilesystemError
 
         # Buscar en las entradas de directorio
         for entry in self.directory_entries:
@@ -416,7 +416,7 @@ class Filesystem:
         Raises:
             DirectoryFullError: Si no hay entradas disponibles
         """
-        from ..utils.exceptions import DirectoryFullError
+        from utils.exceptions import DirectoryFullError
 
         for i, entry in enumerate(self.directory_entries):
             if entry.is_empty():
@@ -490,8 +490,8 @@ class Filesystem:
             DirectoryFullError: Si el directorio está lleno
         """
         import os
-        from ..utils.validation import validar_nombre_archivo, calcular_clusters_necesarios
-        from ..utils.exceptions import FilenameConflictError, NoSpaceError
+        from utils.validation import validar_nombre_archivo, calcular_clusters_necesarios
+        from utils.exceptions import FilenameConflictError, NoSpaceError
         from .directory_entry import DirectoryEntry
 
         # Determinar nombre de archivo
