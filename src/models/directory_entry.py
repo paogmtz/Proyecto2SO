@@ -8,17 +8,18 @@ El directorio ocupa los clusters 1-4 (bytes 1024-5119), permitiendo hasta 64 arc
 import struct
 from typing import NamedTuple
 
-from ..utils.binary_utils import timestamp_actual
-from ..utils.validation import calcular_clusters_necesarios
+from utils.binary_utils import timestamp_actual
+from utils.validation import calcular_clusters_necesarios
 
 
 # Formato de entrada de directorio según especificación FiUnamFS
 # Total: 64 bytes por entrada
 DIRECTORY_ENTRY_FORMAT = (
+    '<'    # little-endian byte order
     'c'    # file_type (byte 0): '.' para archivo activo, '-' para vacío
     '15s'  # filename (bytes 1-15): nombre de archivo (14 chars + null)
-    '<I'   # start_cluster (bytes 16-19): cluster inicial del archivo
-    '<I'   # file_size (bytes 20-23): tamaño en bytes
+    'I'    # start_cluster (bytes 16-19): cluster inicial del archivo
+    'I'    # file_size (bytes 20-23): tamaño en bytes
     '14s'  # created_timestamp (bytes 24-37): AAAAMMDDHHMMSS
     '14s'  # modified_timestamp (bytes 38-51): AAAAMMDDHHMMSS
     '12x'  # reserved (bytes 52-63): reservado para uso futuro

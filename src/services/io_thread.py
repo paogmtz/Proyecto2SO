@@ -16,8 +16,8 @@ import threading
 import queue
 from typing import Dict, Tuple, Optional
 
-from ..models.filesystem import Filesystem
-from ..utils.exceptions import (
+from models.filesystem import Filesystem
+from utils.exceptions import (
     FiUnamFSError,
     InvalidFilesystemError,
     FileNotFoundInFilesystemError,

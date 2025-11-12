@@ -9,23 +9,24 @@ firma, versión, tamaño de cluster y distribución de clusters.
 import struct
 from typing import NamedTuple
 
-from ..utils.exceptions import InvalidFilesystemError
+from utils.exceptions import InvalidFilesystemError
 
 
 # Formato del superblock según especificación FiUnamFS
 # Total: 54 bytes usados de 1024 (resto es padding reservado)
 SUPERBLOCK_FORMAT = (
+    '<'    # little-endian byte order
     '9s'   # signature (bytes 0-8): "FiUnamFS"
     'x'    # padding (byte 9)
     '5s'   # version (bytes 10-14): "26-2" + null o padding
     '5x'   # padding (bytes 15-19)
     '16s'  # volume_label (bytes 20-35): etiqueta de volumen
     '4x'   # padding (bytes 36-39)
-    '<I'   # cluster_size (bytes 40-43): tamaño de cluster en bytes (1024)
+    'I'    # cluster_size (bytes 40-43): tamaño de cluster en bytes (1024)
     'x'    # padding (byte 44)
-    '<I'   # directory_clusters (bytes 45-48): clusters para directorio (4)
+    'I'    # directory_clusters (bytes 45-48): clusters para directorio (4)
     'x'    # padding (byte 49)
-    '<I'   # total_clusters (bytes 50-53): total de clusters (1440)
+    'I'    # total_clusters (bytes 50-53): total de clusters (1440)
 )
 
 
