@@ -35,10 +35,10 @@ class Superblock(NamedTuple):
 
     Atributos:
         signature: Debe ser b'FiUnamFS' (9 bytes)
-        version: Debe ser b'26-2' (versión del formato)
+        version: Debe ser b'26-1' o b'26-2' (versión del formato)
         volume_label: Etiqueta del volumen (hasta 16 bytes)
         cluster_size: Tamaño de cada cluster en bytes (debe ser 1024)
-        directory_clusters: Clusters reservados para directorio (debe ser 4)
+        directory_clusters: Clusters reservados para directorio (típicamente 3-4)
         total_clusters: Total de clusters en el filesystem (debe ser 1440)
     """
     signature: bytes
@@ -80,9 +80,9 @@ class Superblock(NamedTuple):
 
         Verifica:
         - Firma correcta: "FiUnamFS"
-        - Versión soportada: "26-2"
+        - Versión soportada: "26-1" o "26-2"
         - Tamaño de cluster: 1024 bytes
-        - Clusters de directorio: 4
+        - Clusters de directorio: entre 1 y 64
         - Total de clusters: 1440
 
         Raises:
@@ -94,9 +94,9 @@ class Superblock(NamedTuple):
                 f"se encontró {self.signature!r}"
             )
 
-        if self.version != b'26-2':
+        if self.version not in (b'26-1', b'26-2'):
             raise InvalidFilesystemError(
-                f"Versión no soportada: se esperaba b'26-2', "
+                f"Versión no soportada: se esperaba b'26-1' o b'26-2', "
                 f"se encontró {self.version!r}"
             )
 
@@ -106,9 +106,9 @@ class Superblock(NamedTuple):
                 f"se encontró {self.cluster_size}"
             )
 
-        if self.directory_clusters != 4:
+        if self.directory_clusters < 1 or self.directory_clusters > 64:
             raise InvalidFilesystemError(
-                f"Número de clusters de directorio inválido: se esperaba 4, "
+                f"Número de clusters de directorio inválido: debe estar entre 1 y 64, "
                 f"se encontró {self.directory_clusters}"
             )
 
