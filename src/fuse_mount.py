@@ -217,6 +217,150 @@ class FiUnamFSMount(Operations):
         except FileNotFoundInFilesystemError:
             raise FuseOSError(errno.ENOENT)
 
+    # ========== OPERACIONES DE ESCRITURA ==========
+
+    def create(self, path: str, mode: int, fi=None) -> int:
+        """
+        Crea un nuevo archivo en el filesystem.
+
+        Esta operación es llamada cuando se crea un archivo nuevo
+        (e.g., touch archivo.txt, o redirección >).
+
+        Args:
+            path: Ruta del archivo a crear (e.g., "/nuevo.txt")
+            mode: Permisos del archivo (ignorado, FiUnamFS no soporta permisos)
+            fi: File info (no usado)
+
+        Returns:
+            0 (éxito)
+
+        Raises:
+            FuseOSError: Si hay error en la creación
+        """
+        # Remover el '/' inicial
+        filename = path[1:]
+
+        try:
+            # Crear archivo vacío en el filesystem
+            # Usamos import_file con un archivo temporal vacío
+            import tempfile
+            import os as os_module
+
+            # Crear archivo temporal vacío
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+                tmp_path = tmp.name
+
+            try:
+                # Importar el archivo vacío con el nombre deseado
+                self.fs.import_file(tmp_path, filename)
+            finally:
+                # Limpiar archivo temporal
+                os_module.unlink(tmp_path)
+
+            return 0
+
+        except FilenameConflictError:
+            raise FuseOSError(errno.EEXIST)
+        except NoSpaceError:
+            raise FuseOSError(errno.ENOSPC)
+        except DirectoryFullError:
+            raise FuseOSError(errno.ENOSPC)
+        except ValueError as e:
+            # Nombre inválido
+            raise FuseOSError(errno.EINVAL)
+
+    def write(self, path: str, data: bytes, offset: int, fh) -> int:
+        """
+        Escribe datos a un archivo.
+
+        IMPORTANTE: Debido a la naturaleza de asignación contigua de FiUnamFS,
+        solo soportamos escritura completa del archivo (no modificación parcial).
+
+        Args:
+            path: Ruta del archivo
+            data: Datos a escribir
+            offset: Posición donde escribir
+            fh: File handle (no usado)
+
+        Returns:
+            Número de bytes escritos
+
+        Raises:
+            FuseOSError: Si la operación no es soportada o hay error
+        """
+        # Remover el '/' inicial
+        filename = path[1:]
+
+        # FiUnamFS solo soporta asignación contigua, por lo que no podemos
+        # modificar archivos in-place. Solo soportamos escribir archivos completos.
+
+        # Para simplificar, vamos a rechazar escrituras con offset != 0
+        # El flujo correcto es: truncate() seguido de write() con offset=0
+
+        if offset != 0:
+            # No soportamos escritura parcial
+            raise FuseOSError(errno.EOPNOTSUPP)
+
+        try:
+            # Primero eliminar el archivo existente si existe
+            try:
+                self.fs.delete_file(filename)
+            except FileNotFoundInFilesystemError:
+                pass  # El archivo no existía, está bien
+
+            # Escribir el nuevo contenido
+            import tempfile
+            import os as os_module
+
+            # Crear archivo temporal con el contenido
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False) as tmp:
+                tmp.write(data)
+                tmp_path = tmp.name
+
+            try:
+                # Importar el archivo con el nuevo contenido
+                self.fs.import_file(tmp_path, filename)
+                return len(data)
+            finally:
+                # Limpiar archivo temporal
+                os_module.unlink(tmp_path)
+
+        except FilenameConflictError:
+            raise FuseOSError(errno.EEXIST)
+        except NoSpaceError:
+            raise FuseOSError(errno.ENOSPC)
+        except DirectoryFullError:
+            raise FuseOSError(errno.ENOSPC)
+
+    def truncate(self, path: str, length: int, fh=None):
+        """
+        Trunca un archivo a una longitud específica.
+
+        Esta operación es llamada antes de sobrescribir un archivo.
+
+        Args:
+            path: Ruta del archivo
+            length: Nueva longitud (típicamente 0 para sobrescritura)
+            fh: File handle (no usado)
+
+        Raises:
+            FuseOSError: Si el archivo no existe o hay error
+        """
+        # Remover el '/' inicial
+        filename = path[1:]
+
+        # Para truncar a 0 (caso común antes de write), simplemente
+        # eliminamos el archivo. write() lo recreará.
+        if length == 0:
+            try:
+                self.fs.delete_file(filename)
+            except FileNotFoundInFilesystemError:
+                # Si el archivo no existe, está bien (será creado en write)
+                pass
+        else:
+            # No soportamos truncate a longitud != 0 debido a asignación contigua
+            raise FuseOSError(errno.EOPNOTSUPP)
+
     # ========== OPERACIONES AUXILIARES ==========
 
     def statfs(self, path: str) -> Dict:
