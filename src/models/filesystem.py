@@ -275,7 +275,7 @@ class Filesystem:
         for entry in self.directory_entries:
             if entry.is_active():
                 files.append({
-                    'filename': entry.filename,
+                    'filename': entry.filename.strip(),  # Remover espacios de padding
                     'size': entry.file_size,
                     'created': timestamp_legible(entry.created_timestamp),
                     'modified': timestamp_legible(entry.modified_timestamp),
@@ -312,13 +312,14 @@ class Filesystem:
         from utils.exceptions import FileNotFoundInFilesystemError
 
         # Buscar en las entradas de directorio
+        # Comparar sin espacios de padding (los nombres se guardan en campo fijo de 14 chars)
         for entry in self.directory_entries:
-            if entry.is_active() and entry.filename == filename:
+            if entry.is_active() and entry.filename.strip() == filename:
                 return entry
 
         # Archivo no encontrado - construir lista de archivos disponibles
         archivos_disponibles = [
-            entry.filename
+            entry.filename.strip()
             for entry in self.directory_entries
             if entry.is_active()
         ]
@@ -503,7 +504,7 @@ class Filesystem:
 
         # Verificar que no exista archivo con ese nombre
         for entry in self.directory_entries:
-            if entry.is_active() and entry.filename == filename:
+            if entry.is_active() and entry.filename.strip() == filename:
                 raise FilenameConflictError(filename)
 
         # Leer archivo fuente
