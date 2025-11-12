@@ -8,7 +8,10 @@ Gestor de sistema de archivos FiUnamFS (Facultad de Ingeniería UNAM Filesystem)
 
 ## Descripción
 
-Este proyecto implementa un gestor de archivos para el sistema FiUnamFS, un filesystem que simula un disquete de 1.44MB. El programa permite listar, importar, exportar y eliminar archivos de imágenes de disco FiUnamFS mediante una interfaz de línea de comandos.
+Este proyecto implementa un gestor de archivos para el sistema FiUnamFS, un filesystem que simula un disquete de 1.44MB. El programa ofrece **dos interfaces**:
+
+1. **CLI (Línea de Comandos)**: Comandos para listar, importar, exportar y eliminar archivos
+2. **FUSE (Filesystem in Userspace)**: Monta el filesystem como un directorio, permitiendo usar herramientas estándar de Linux (`ls`, `cp`, `rm`, etc.)
 
 ### Características principales
 
@@ -16,17 +19,25 @@ Este proyecto implementa un gestor de archivos para el sistema FiUnamFS, un file
 - **Arquitectura de 2 hilos**: Un hilo maneja las operaciones de E/S del filesystem, otro maneja la interfaz de usuario
 - **Sincronización thread-safe**: Comunicación mediante `queue.Queue` de Python
 - **Validación estricta**: Cumplimiento total de la especificación FiUnamFS (firma, versión, formato binario)
-- **Sin dependencias externas**: Solo usa biblioteca estándar de Python
+- **Módulo FUSE**: Integración nativa con el sistema operativo
 
 ## Requisitos
 
+### CLI (obligatorio)
 - **Python**: 3.6 o superior
 - **Sistema Operativo**: Linux, macOS o Windows
-- **Dependencias**: Ninguna (solo biblioteca estándar de Python)
+- **Dependencias**: Solo biblioteca estándar de Python
+
+### FUSE (opcional, solo Linux/macOS)
+- **Python**: 3.6 o superior
+- **Sistema Operativo**: Linux o macOS
+- **Dependencias**:
+  - `fusepy` (Python FUSE bindings)
+  - `libfuse` (biblioteca del sistema)
 
 ## Instalación
 
-No requiere instalación de paquetes externos. Simplemente clona el repositorio:
+### Instalación básica (CLI)
 
 ```bash
 git clone git@github.com:paogmtz/Proyecto2SO.git
@@ -34,15 +45,42 @@ cd Proyecto2SO
 python3 --version  # Verificar Python 3.6+
 ```
 
+### Instalación con FUSE (Linux/macOS)
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install fuse3 libfuse3-dev
+pip3 install fusepy
+```
+
+**Fedora/RHEL:**
+```bash
+sudo dnf install fuse3 fuse3-devel
+pip3 install fusepy
+```
+
+**macOS:**
+```bash
+brew install macfuse
+pip3 install fusepy
+```
+
 ## Uso
 
-### Sintaxis general
+El proyecto ofrece dos formas de interactuar con el filesystem:
+
+1. **CLI**: Comandos individuales para operaciones específicas
+2. **FUSE**: Montaje del filesystem como directorio nativo
+
+### Modo 1: CLI (Línea de Comandos)
+
+#### Sintaxis general
 
 ```bash
 python3 src/fiunamfs_manager.py <COMANDO> <IMAGEN_FILESYSTEM> [OPCIONES]
 ```
 
-### Comandos disponibles
+#### Comandos disponibles
 
 #### 1. Listar archivos
 
@@ -114,6 +152,63 @@ Espacio libre: 1,457,152 bytes (1,423.00 KB)
   Espacio liberado: 10,240 bytes (10.00 KB)
   Clusters liberados: 10
 ```
+
+### Modo 2: FUSE (Filesystem in Userspace)
+
+FUSE permite montar el filesystem FiUnamFS como un directorio normal del sistema, lo que te permite usar comandos nativos de Linux/macOS.
+
+#### Montar el filesystem
+
+```bash
+python3 mount_fiunamfs.py fiunamfs/fiunamfs.img /mnt/fiunamfs
+```
+
+O en primer plano (foreground) para ver logs:
+```bash
+python3 mount_fiunamfs.py fiunamfs/fiunamfs.img /mnt/fiunamfs -f
+```
+
+#### Usar comandos nativos
+
+Una vez montado, puedes usar comandos estándar:
+
+```bash
+# Listar archivos
+ls -lh /mnt/fiunamfs
+
+# Leer archivo
+cat /mnt/fiunamfs/README.TXT
+
+# Copiar archivo desde FiUnamFS
+cp /mnt/fiunamfs/archivo.txt ~/Downloads/
+
+# Copiar archivo a FiUnamFS
+cp ~/Documents/nuevo.txt /mnt/fiunamfs/
+
+# Eliminar archivo
+rm /mnt/fiunamfs/viejo.txt
+
+# Ver estadísticas del filesystem
+df -h /mnt/fiunamfs
+```
+
+#### Desmontar
+
+```bash
+fusermount -u /mnt/fiunamfs
+```
+
+O en macOS:
+```bash
+umount /mnt/fiunamfs
+```
+
+#### Limitaciones de FUSE
+
+- **Solo lectura/escritura**: No soporta modificación parcial de archivos (por la naturaleza de asignación contigua)
+- **Sin directorios**: FiUnamFS es plano, no hay subdirectorios
+- **Nombres de 14 caracteres**: Máximo permitido por FiUnamFS
+- **Permisos simulados**: Todos los archivos aparecen con permisos 644
 
 ## Formato FiUnamFS
 
