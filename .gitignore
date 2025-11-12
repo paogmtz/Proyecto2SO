@@ -1,8 +1,3 @@
-# Archivos de desarrollo
-.claude/
-.specify/
-CLAUDE.md
-
 # Python artifacts
 __pycache__/
 *.pyc
