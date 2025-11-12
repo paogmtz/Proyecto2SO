@@ -37,7 +37,7 @@ import time
 from typing import Dict, List
 
 try:
-    from fuse import FUSE, FuseOSError, Operations
+    from fusepy import FUSE, FuseOSError, Operations
 except ImportError:
     print("Error: fusepy no está instalado.", file=sys.stderr)
     print("Instálalo con: pip3 install fusepy", file=sys.stderr)

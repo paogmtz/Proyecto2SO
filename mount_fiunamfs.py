@@ -33,7 +33,7 @@ import argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 try:
-    from fuse import FUSE
+    from fusepy import FUSE
 except ImportError:
     print("Error: fusepy no está instalado.", file=sys.stderr)
     print("", file=sys.stderr)
