@@ -50,7 +50,8 @@ python3 --version  # Verificar Python 3.6+
 **Ubuntu/Debian:**
 ```bash
 sudo apt-get install fuse3 libfuse3-dev
-pip3 install fusepy
+pip3 install fusepy --break-system-packages
+
 ```
 
 **Fedora/RHEL:**
