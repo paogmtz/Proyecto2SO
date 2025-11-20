@@ -54,17 +54,6 @@ pip3 install fusepy --break-system-packages
 
 ```
 
-**Fedora/RHEL:**
-```bash
-sudo dnf install fuse3 fuse3-devel
-pip3 install fusepy
-```
-
-**macOS:**
-```bash
-brew install macfuse
-pip3 install fusepy
-```
 
 ## Uso
 
